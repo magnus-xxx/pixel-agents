@@ -191,6 +191,19 @@ describe('resendAgentActivity', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('replays a pending permission after the waiting status', () => {
+    const store = new AgentStateStore();
+    store.set(1, createTestAgent({ id: 1, isWaiting: true, permissionSent: true }));
+    store.set(2, createTestAgent({ id: 2, isWaiting: true }));
+    const messages: Array<Record<string, unknown>> = [];
+    resendAgentActivity((m) => messages.push(m), store);
+    expect(messages).toEqual([
+      { type: 'agentStatus', id: 1, status: 'waiting' },
+      { type: 'agentToolPermission', id: 1 },
+      { type: 'agentStatus', id: 2, status: 'waiting' },
+    ]);
+  });
+
   it('sends context usage only when agent has tokens', () => {
     let store = new AgentStateStore();
     store.set(1, createTestAgent({ id: 1, contextTokens: 50_000, maxContextTokens: 200_000 }));

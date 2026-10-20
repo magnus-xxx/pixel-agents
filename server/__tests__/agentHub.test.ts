@@ -182,6 +182,82 @@ describe('agent-hub provider: runtime routing', () => {
     }
   });
 
+  it('maps PermissionRequest (waiting on the Owner) to a persistent permission bubble', () => {
+    expect(
+      normalizeHookEvent({ hook_event_name: 'PermissionRequest', session_id: 'hub-zoe' })?.event,
+    ).toEqual({
+      kind: 'permissionRequest',
+    });
+    store = new AgentStateStore();
+    runtime = new AgentRuntime(store, claudeProvider, pushProviders);
+    const seen = messages();
+    runtime.handleHookEvent('agent-hub', {
+      hook_event_name: 'SessionStart',
+      session_id: 'hub-zoe',
+      cwd: untrackedDir(),
+    });
+    runtime.handleHookEvent('agent-hub', {
+      hook_event_name: 'TurnEnd',
+      session_id: 'hub-zoe',
+      awaiting_input: true,
+    });
+    runtime.handleHookEvent('agent-hub', {
+      hook_event_name: 'PermissionRequest',
+      session_id: 'hub-zoe',
+    });
+    expect(seen).toContainEqual(expect.objectContaining({ type: 'agentToolPermission' }));
+  });
+
+  it('moves a Hub agent to the new project when its cwd changes (same name, palette, one character)', () => {
+    store = new AgentStateStore();
+    runtime = new AgentRuntime(store, claudeProvider, pushProviders);
+    const first = untrackedDir();
+    const second = untrackedDir();
+    const removed: number[] = [];
+    store.on('agentRemoved', (id) => removed.push(id));
+    runtime.handleHookEvent('agent-hub', {
+      hook_event_name: 'SessionStart',
+      session_id: 'hub-leo',
+      cwd: first,
+    });
+    runtime.handleHookEvent('agent-hub', {
+      hook_event_name: 'ToolStart',
+      session_id: 'hub-leo',
+      tool_name: 'Bash',
+    });
+    const before = [...store.values()][0];
+    runtime.handleHookEvent('agent-hub', {
+      hook_event_name: 'SessionStart',
+      session_id: 'hub-leo',
+      cwd: second,
+    });
+    expect(removed).toEqual([before.id]);
+    expect(store.size).toBe(1);
+    const after = [...store.values()][0];
+    expect(after.projectDir).toBe(second);
+    expect(after.directoryName).toBe(path.basename(second));
+    expect(after.agentName).toBe('Leo');
+    expect(after.palette).toBe(2);
+    // Later events route to the relocated character.
+    const seen = messages();
+    runtime.handleHookEvent('agent-hub', {
+      hook_event_name: 'ToolStart',
+      session_id: 'hub-leo',
+      tool_name: 'Read',
+      status: 'OPS-1 · đọc',
+    });
+    expect(seen).toContainEqual(
+      expect.objectContaining({ type: 'agentToolStart', id: after.id, status: 'OPS-1 · đọc' }),
+    );
+    // Same cwd again: no move.
+    runtime.handleHookEvent('agent-hub', {
+      hook_event_name: 'SessionStart',
+      session_id: 'hub-leo',
+      cwd: second,
+    });
+    expect(removed).toHaveLength(1);
+  });
+
   it('leaves Claude routing and its foreign-session gate unchanged', () => {
     store = new AgentStateStore();
     runtime = new AgentRuntime(store, claudeProvider, pushProviders);

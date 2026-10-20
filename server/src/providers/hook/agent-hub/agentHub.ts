@@ -13,8 +13,11 @@
  *   { hook_event_name: 'ToolStart',    session_id, tool_name: 'Bash', status: 'MAG-12 · chạy lệnh · npm test' }
  *   { hook_event_name: 'ToolEnd',      session_id }
  *   { hook_event_name: 'TurnEnd',      session_id, awaiting_input?: true }
+ *   { hook_event_name: 'PermissionRequest', session_id }   (waiting on the Owner: persistent bubble)
  *   { hook_event_name: 'SessionEnd',   session_id, reason?: string }
  * One session per Hub agent (`hub-<agentKey>`), so each agent is one character.
+ * A SessionStart whose cwd differs from the character's project moves the
+ * character to that project's Area (adoptsAllSessions providers only).
  */
 
 import type {
@@ -71,6 +74,8 @@ export function normalizeHookEvent(
       return { sessionId, event: { kind: 'toolEnd', toolId: str(raw.tool_id) ?? '' } };
     case 'TurnEnd':
       return { sessionId, event: { kind: 'turnEnd', awaitingInput: raw.awaiting_input === true } };
+    case 'PermissionRequest':
+      return { sessionId, event: { kind: 'permissionRequest' } };
     case 'SessionEnd':
       return { sessionId, event: { kind: 'sessionEnd', reason: str(raw.reason) } };
     default:

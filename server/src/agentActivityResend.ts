@@ -75,6 +75,13 @@ export function resendAgentActivity(
       });
     }
 
+    // 4b. A pending permission/approval: its bubble stays until the agent moves
+    // on, so a client connecting later must see it too (the waiting checkmark
+    // above fades on its own and would otherwise replace it).
+    if (agent.permissionSent) {
+      send({ type: 'agentToolPermission', id });
+    }
+
     // 5. Context usage
     if (agent.contextTokens > 0) {
       send({

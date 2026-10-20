@@ -223,6 +223,28 @@ export class AgentRuntime {
           origin?.identity,
         );
       },
+      onSessionRelocated: (agentId, sessionId, cwd, origin) => {
+        // Despawn in the old project's Area, spawn in the new one: same session,
+        // same fixed identity, a seat picked from the new directory's Area.
+        console.log(`[Pixel Agents] Hook: Agent ${agentId} - moved to ${path.basename(cwd)}`);
+        this.unregisterAgent(sessionId);
+        this.removeAgent(agentId);
+        adoptExternalSessionFromHook(
+          sessionId,
+          undefined,
+          cwd,
+          this.knownJsonlFiles,
+          this.store.nextAgentId,
+          this.store,
+          this.fileWatchers,
+          this.pollingTimers,
+          this.waitingTimers,
+          this.permissionTimers,
+          () => this.store.persist(),
+          (agent) => this.registerAgent(agent.sessionId, agent.id),
+          origin.identity,
+        );
+      },
       onSessionClear: (agentId, newSessionId, newTranscriptPath) => {
         if (newTranscriptPath) {
           this.knownJsonlFiles.add(newTranscriptPath);

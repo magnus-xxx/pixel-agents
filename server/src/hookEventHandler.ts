@@ -41,6 +41,14 @@ interface SessionLifecycleCallbacks {
      *  of tracking (push-based orchestrators), and a fixed name/palette. */
     origin?: { alwaysAdopt: boolean; identity?: SessionIdentity },
   ) => void;
+  /** Called when a hooks-only session of a push provider reports a different
+   *  working directory (the orchestrator moved that agent to another project). */
+  onSessionRelocated?: (
+    agentId: number,
+    sessionId: string,
+    cwd: string,
+    origin: { alwaysAdopt: boolean; identity?: SessionIdentity },
+  ) => void;
   /** Called when /clear is detected via hooks (SessionEnd reason=clear + SessionStart source=clear). */
   onSessionClear?: (
     agentId: number,
@@ -202,6 +210,21 @@ export class HookEventHandler {
         const agent = this.agents.get(existingAgentId);
         if (agent) {
           agent.hookDelivered = true;
+        }
+        // A push provider's agent moved to another project: re-seat its
+        // character in that project's Area. Claude sessions never move (a new
+        // directory is a new session), so this is gated on adoptsAllSessions.
+        if (
+          agent?.hooksOnly &&
+          provider.adoptsAllSessions &&
+          cwd &&
+          path.resolve(agent.projectDir).toLowerCase() !== path.resolve(cwd).toLowerCase()
+        ) {
+          this.lifecycleCallbacks.onSessionRelocated?.(existingAgentId, event.session_id, cwd, {
+            alwaysAdopt: true,
+            identity: provider.sessionIdentity?.(event.session_id),
+          });
+          return;
         }
         if (debug)
           console.log(
