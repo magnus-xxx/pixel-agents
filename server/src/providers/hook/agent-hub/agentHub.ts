@@ -30,12 +30,16 @@ export const AGENT_HUB_PROVIDER_ID = 'agent-hub';
 export const AGENT_HUB_SESSION_PREFIX = 'hub-';
 
 /** Fixed character per Hub agent: the label over the head and a stable sheet.
- *  Unknown agent keys get a capitalized label and the diversity assigner. */
+ *  Unknown agent keys get a capitalized label and the diversity assigner.
+ *  Ana/Ben/Leo/Zoe use the Hub's own sheets, loaded as an external asset
+ *  directory after the 6 bundled ones (char_0..3 there = palettes 6..9). The
+ *  webview picks `palette % loadedCount`, so without that directory they fall
+ *  back to bundled sheets 0..3 instead of breaking. */
 const HUB_AGENTS: Record<string, SessionIdentity> = {
-  ana: { agentName: 'Ana', palette: 0 },
-  ben: { agentName: 'Ben', palette: 1 },
-  leo: { agentName: 'Leo', palette: 2 },
-  zoe: { agentName: 'Zoe', palette: 3 },
+  ana: { agentName: 'Ana', palette: 6 },
+  ben: { agentName: 'Ben', palette: 7 },
+  leo: { agentName: 'Leo', palette: 8 },
+  zoe: { agentName: 'Zoe', palette: 9 },
   owner: { agentName: 'Owner', palette: 4 },
 };
 

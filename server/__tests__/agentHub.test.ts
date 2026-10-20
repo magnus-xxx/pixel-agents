@@ -61,8 +61,8 @@ describe('agent-hub provider: normalization', () => {
   });
 
   it('gives each Hub agent a fixed name and palette', () => {
-    expect(sessionIdentity('hub-ana')).toEqual({ agentName: 'Ana', palette: 0 });
-    expect(sessionIdentity('hub-zoe')).toEqual({ agentName: 'Zoe', palette: 3 });
+    expect(sessionIdentity('hub-ana')).toEqual({ agentName: 'Ana', palette: 6 });
+    expect(sessionIdentity('hub-zoe')).toEqual({ agentName: 'Zoe', palette: 9 });
     expect(sessionIdentity('hub-max')).toEqual({ agentName: 'Max' });
     expect(sessionIdentity('some-claude-session')).toBeUndefined();
   });
@@ -113,7 +113,7 @@ describe('agent-hub provider: runtime routing', () => {
     expect(store.size).toBe(1);
     const agent = [...store.values()][0];
     expect(agent.agentName).toBe('Leo');
-    expect(agent.palette).toBe(2);
+    expect(agent.palette).toBe(8);
     expect(agent.hooksOnly).toBe(true);
     expect(agent.projectDir).toBe(cwd);
     expect(seen).toContainEqual(
@@ -238,7 +238,7 @@ describe('agent-hub provider: runtime routing', () => {
     expect(after.projectDir).toBe(second);
     expect(after.directoryName).toBe(path.basename(second));
     expect(after.agentName).toBe('Leo');
-    expect(after.palette).toBe(2);
+    expect(after.palette).toBe(8);
     // Later events route to the relocated character.
     const seen = messages();
     runtime.handleHookEvent('agent-hub', {
