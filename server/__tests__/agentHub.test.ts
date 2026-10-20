@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { resendAgentActivity } from '../src/agentActivityResend.js';
 import { AgentRuntime } from '../src/agentRuntime.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { startStaleExternalAgentCheck } from '../src/fileWatcher.js';
@@ -256,6 +257,60 @@ describe('agent-hub provider: runtime routing', () => {
       cwd: second,
     });
     expect(removed).toHaveLength(1);
+  });
+
+  it('a client reconnecting mid-job is replayed the running tool, then nothing once the turn ends', () => {
+    store = new AgentStateStore();
+    runtime = new AgentRuntime(store, claudeProvider, pushProviders);
+    const cwd = untrackedDir();
+    const hub = (raw: Record<string, unknown>) =>
+      runtime.handleHookEvent('agent-hub', { session_id: 'hub-ben', ...raw });
+    const reconnect = () => {
+      const sent: Array<Record<string, unknown>> = [];
+      resendAgentActivity((m) => sent.push(m), store);
+      return sent;
+    };
+    hub({ hook_event_name: 'SessionStart', cwd });
+    hub({ hook_event_name: 'ToolEnd' });
+    hub({ hook_event_name: 'ToolStart', tool_name: 'Hub', status: 'MAG-21 · chạy việc' });
+    hub({ hook_event_name: 'ToolEnd' });
+    hub({
+      hook_event_name: 'ToolStart',
+      tool_name: 'write_to_file',
+      status: 'MAG-21 · write_to_file · src/App.tsx',
+    });
+    const id = [...store.values()][0].id;
+
+    // Page reload while the job runs: exactly the current tool, no stale earlier one, not waiting.
+    const midJob = reconnect().filter((m) => m.id === id);
+    expect(midJob.filter((m) => m.type === 'agentToolStart')).toEqual([
+      expect.objectContaining({
+        status: 'MAG-21 · write_to_file · src/App.tsx',
+        toolName: 'write_to_file',
+      }),
+    ]);
+    expect(midJob.some((m) => m.type === 'agentStatus' && m.status === 'waiting')).toBe(false);
+
+    // Turn ends: reload shows a finished agent, no running tool.
+    hub({ hook_event_name: 'ToolEnd' });
+    hub({ hook_event_name: 'TurnEnd' });
+    const afterTurn = reconnect().filter((m) => m.id === id);
+    expect(afterTurn.some((m) => m.type === 'agentToolStart')).toBe(false);
+    expect(afterTurn).toContainEqual({ type: 'agentStatus', id, status: 'waiting' });
+
+    // Waiting on the Owner: reload shows the waiting status and the persistent bubble.
+    hub({ hook_event_name: 'ToolEnd' });
+    hub({ hook_event_name: 'ToolStart', tool_name: 'Hub', status: 'MAG-21 · chạy việc' });
+    hub({ hook_event_name: 'ToolEnd' });
+    hub({ hook_event_name: 'TurnEnd', awaiting_input: true });
+    hub({ hook_event_name: 'PermissionRequest' });
+    const waiting = reconnect().filter((m) => m.id === id);
+    expect(waiting.some((m) => m.type === 'agentToolStart')).toBe(false);
+    expect(waiting.map((m) => m.type)).toEqual([
+      'agentTeamInfo',
+      'agentStatus',
+      'agentToolPermission',
+    ]);
   });
 
   it('leaves Claude routing and its foreign-session gate unchanged', () => {

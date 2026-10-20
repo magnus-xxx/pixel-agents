@@ -498,6 +498,15 @@ export class HookEventHandler {
         status,
         toolName,
       });
+      // Hooks-only agents have no transcript to rebuild tool state from, so the
+      // hook event IS the record: keep it in the store so a client connecting
+      // mid-tool (page reload) is replayed the running tool instead of an idle
+      // character. Transcript agents get these entries from JSONL instead.
+      if (agent.hooksOnly) {
+        agent.activeToolIds.add(hookToolId);
+        agent.activeToolStatuses.set(hookToolId, status);
+        agent.activeToolNames.set(hookToolId, toolName);
+      }
     }
     this.agents.broadcast({
       type: 'agentStatus',
@@ -520,6 +529,11 @@ export class HookEventHandler {
           id: agentId,
           toolId: agent.currentHookToolId,
         });
+      }
+      if (agent.hooksOnly) {
+        agent.activeToolIds.delete(agent.currentHookToolId);
+        agent.activeToolStatuses.delete(agent.currentHookToolId);
+        agent.activeToolNames.delete(agent.currentHookToolId);
       }
       agent.currentHookToolId = undefined;
       agent.currentHookToolName = undefined;
