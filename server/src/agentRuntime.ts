@@ -88,6 +88,9 @@ export class AgentRuntime {
   constructor(
     private readonly store: AgentStateStore,
     provider: HookProvider,
+    /** Push-based providers routed by their POST's providerId alongside the
+     *  primary one (see providers/index.ts pushProviders). */
+    extraProviders: readonly HookProvider[] = [],
   ) {
     // Wire module-level dependencies
     setDismissalTracker(this.dismissalTracker);
@@ -149,11 +152,12 @@ export class AgentRuntime {
       provider,
       new SessionRouter(),
       this.watchAllSessions,
+      extraProviders,
     );
 
     // Wire hook lifecycle callbacks to shared agent operations
     this.hookEventHandler.setLifecycleCallbacks({
-      onExternalSessionDetected: (sessionId, transcriptPath, cwd) => {
+      onExternalSessionDetected: (sessionId, transcriptPath, cwd, origin) => {
         const projectDir = transcriptPath ? path.dirname(transcriptPath) : cwd;
         // Teammate session of a tracked lead? Attach it as a teammate character
         // instead of adopting a generic external agent -- and regardless of the
@@ -192,7 +196,11 @@ export class AgentRuntime {
             }
           }
         }
-        if (!isTrackedProjectDir(projectDir) && !this.watchAllSessions.current) {
+        if (
+          !origin?.alwaysAdopt &&
+          !isTrackedProjectDir(projectDir) &&
+          !this.watchAllSessions.current
+        ) {
           console.log(
             `[Pixel Agents] Hook: external session ${sessionId.slice(0, 8)}... not adopted ` +
               `(project untracked, Watch All Sessions off)`,
@@ -212,6 +220,7 @@ export class AgentRuntime {
           this.permissionTimers,
           () => this.store.persist(),
           (agent) => this.registerAgent(agent.sessionId, agent.id),
+          origin?.identity,
         );
       },
       onSessionClear: (agentId, newSessionId, newTranscriptPath) => {

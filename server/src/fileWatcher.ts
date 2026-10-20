@@ -27,7 +27,7 @@ import type * as vscode from 'vscode';
 
 const debug = process.env.PIXEL_AGENTS_DEBUG !== '0';
 
-import type { HookProvider } from '../../core/src/provider.js';
+import type { HookProvider, SessionIdentity } from '../../core/src/provider.js';
 import type { TeamProvider } from '../../core/src/teamProvider.js';
 import type { ITerminalAdapter } from '../../core/src/terminalAdapter.js';
 import { createAgentState } from './agentState.js';
@@ -1024,6 +1024,8 @@ export function adoptExternalSessionFromHook(
 
   persistAgents: () => void,
   onAgentCreated?: (agent: AgentState) => void,
+  /** Fixed name/palette from the provider (hooks-only sessions). */
+  identity?: SessionIdentity,
 ): void {
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
@@ -1082,6 +1084,11 @@ export function adoptExternalSessionFromHook(
       lastDataAt: Date.now(),
       directoryName,
     });
+    if (identity?.agentName) agent.agentName = identity.agentName;
+    if (identity?.palette !== undefined) {
+      agent.palette = identity.palette;
+      agent.hueShift = identity.hueShift ?? 0;
+    }
     assignPaletteIfNeeded(agent, agents);
     agents.set(id, agent);
     persistAgents();
@@ -1495,6 +1502,10 @@ export function startStaleExternalAgentCheck(
 
     for (const [id, agent] of agents) {
       if (!agent.isExternal) continue;
+      // Hooks-only agents have no transcript file (jsonlFile === ''), so the
+      // stat below would always fail and despawn them within one interval.
+      // Their lifecycle is SessionEnd's alone.
+      if (agent.hooksOnly) continue;
 
       // Only despawn if the JSONL file has been deleted from disk.
       // Inactive external agents stay alive so they can resume when

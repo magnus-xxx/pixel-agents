@@ -12,15 +12,23 @@
  */
 
 import type { HookProvider } from '../../../core/src/provider.js';
+import { agentHubProvider } from './hook/agent-hub/agentHub.js';
 import { claudeProvider } from './hook/claude/claude.js';
 
-export { claudeProvider };
+export { agentHubProvider, claudeProvider };
 export { copyHookScript } from './hook/claude/claudeHookInstaller.js';
 
 /** Every bundled hook provider, in registration order. The consent gate loops
  *  over this at the webviewReady handshake (one ask per provider that needs
  *  one) and `hooksConsentResponse` resolves its provider id against it. */
 export const hookProviders: readonly HookProvider[] = [claudeProvider];
+
+/** Providers whose events are PUSHED by a local orchestrator rather than by a
+ *  hook script this server installs. Routed by POST providerId alongside the
+ *  primary provider, but deliberately kept out of `hookProviders`: there is no
+ *  install to consent to, so the consent gate and the hooks toggles never see
+ *  them. */
+export const pushProviders: readonly HookProvider[] = [agentHubProvider];
 
 /** Resolve a wire-supplied provider id, or undefined for an unknown one —
  *  the caller writes nothing on undefined (fail-closed, like a junk choice). */

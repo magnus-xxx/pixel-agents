@@ -1,6 +1,6 @@
 import * as path from 'path';
 
-import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
+import type { AgentEvent, HookProvider, SessionIdentity } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
 import type { SessionRouter } from './sessionRouter.js';
@@ -37,6 +37,9 @@ interface SessionLifecycleCallbacks {
     sessionId: string,
     transcriptPath: string | undefined,
     cwd: string,
+    /** What the reporting provider says about this session: adopt it regardless
+     *  of tracking (push-based orchestrators), and a fixed name/palette. */
+    origin?: { alwaysAdopt: boolean; identity?: SessionIdentity },
   ) => void;
   /** Called when /clear is detected via hooks (SessionEnd reason=clear + SessionStart source=clear). */
   onSessionClear?: (
@@ -69,14 +72,30 @@ export class HookEventHandler {
     private provider: HookProvider,
     private sessionRouter: SessionRouter,
     private watchAllSessionsRef?: { current: boolean },
+    /** Further providers routed by the POST's providerId (e.g. agent-hub). The
+     *  primary `provider` keeps handling its own id and any unknown id, exactly
+     *  as before this list existed. */
+    extraProviders: readonly HookProvider[] = [],
   ) {
-    if (provider.protocolVersion !== HookEventHandler.SUPPORTED_PROTOCOL_VERSION) {
-      console.warn(
-        `[Pixel Agents] HookProvider "${provider.id}" reports protocolVersion=${provider.protocolVersion}, ` +
-          `but handler understands ${HookEventHandler.SUPPORTED_PROTOCOL_VERSION}. ` +
-          `Events from this provider will be dropped.`,
-      );
+    for (const p of [provider, ...extraProviders]) {
+      if (p.protocolVersion !== HookEventHandler.SUPPORTED_PROTOCOL_VERSION) {
+        console.warn(
+          `[Pixel Agents] HookProvider "${p.id}" reports protocolVersion=${p.protocolVersion}, ` +
+            `but handler understands ${HookEventHandler.SUPPORTED_PROTOCOL_VERSION}. ` +
+            `Events from this provider will be dropped.`,
+        );
+      }
     }
+    for (const p of extraProviders) {
+      if (p.id !== provider.id) this.extraProviders.set(p.id, p);
+    }
+  }
+
+  private readonly extraProviders = new Map<string, HookProvider>();
+
+  /** The provider that owns a POST's providerId (the primary one by default). */
+  private providerFor(providerId: string): HookProvider {
+    return this.extraProviders.get(providerId) ?? this.provider;
   }
 
   /** Merged set of tool names that spawn subagents (teammates + within-turn subagents
@@ -130,7 +149,8 @@ export class HookEventHandler {
    * @param event - The hook event payload from the CLI tool
    */
   handleEvent(_providerId: string, event: HookEvent): void {
-    if (this.provider.protocolVersion !== HookEventHandler.SUPPORTED_PROTOCOL_VERSION) {
+    const provider = this.providerFor(_providerId);
+    if (provider.protocolVersion !== HookEventHandler.SUPPORTED_PROTOCOL_VERSION) {
       return; // version mismatch already logged in constructor
     }
     // ── Provider normalization boundary ───────────────────────────────────────
@@ -140,7 +160,7 @@ export class HookEventHandler {
     // uses the normalized AgentEvent.kind. Raw `event.*` reads are still allowed in a few
     // places for provider-specific metadata that AgentEvent doesn't capture (transcript_path,
     // cwd for external-session adoption; event-specific teammate identity for routing).
-    const normalized = this.provider.normalizeHookEvent(event);
+    const normalized = provider.normalizeHookEvent(event);
     if (!normalized) return; // unknown / uninteresting event -- silently drop
     const normEvent = normalized.event;
     const eventName = event.hook_event_name; // retained for logs only
@@ -275,6 +295,10 @@ export class HookEventHandler {
         pending.sessionId,
         pending.transcriptPath,
         pending.cwd,
+        {
+          alwaysAdopt: provider.adoptsAllSessions === true,
+          identity: provider.sessionIdentity?.(pending.sessionId),
+        },
       );
       // Re-process this event now that the agent exists
       this.handleEvent(_providerId, event);
@@ -328,7 +352,7 @@ export class HookEventHandler {
       case 'sessionEnd':
         return this.handleSessionEnd(normEvent, agent, agentId);
       case 'toolStart':
-        return this.handlePreToolUse(normEvent, agent, agentId);
+        return this.handlePreToolUse(normEvent, agent, agentId, provider);
       case 'toolEnd':
         // Both PostToolUse and PostToolUseFailure normalize to toolEnd. Distinguishing
         // them inside handlers would require extra info; the existing behavior was
@@ -412,10 +436,11 @@ export class HookEventHandler {
     normEvent: Extract<AgentEvent, { kind: 'toolStart' }>,
     agent: AgentState,
     agentId: number,
+    provider: HookProvider = this.provider,
   ): void {
     const toolName = normEvent.toolName;
     const toolInput = (normEvent.input as Record<string, unknown> | undefined) ?? {};
-    const status = this.provider.formatToolStatus(toolName, toolInput);
+    const status = provider.formatToolStatus(toolName, toolInput);
     const hookToolId = `hook-${Date.now()}`;
 
     // Track for PostToolUse/SubagentStart correlation (always, even if suppressed below).
@@ -424,7 +449,7 @@ export class HookEventHandler {
     agent.currentHookToolId = hookToolId;
     agent.currentHookToolName = toolName;
     agent.currentHookIsTeammateSpawn =
-      this.provider.team?.isTeammateSpawnCall(toolName, toolInput) ?? false;
+      provider.team?.isTeammateSpawnCall(toolName, toolInput) ?? false;
 
     // When a lead has inline teammates, hook tool events are ambiguous (could be
     // from the lead or any teammate -- they share session_id). Suppress hook-originated

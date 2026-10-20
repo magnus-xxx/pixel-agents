@@ -62,6 +62,16 @@ export type AgentEvent =
     }
   | { kind: 'sessionEnd'; reason?: string };
 
+/** Fixed character identity a provider may assign to a session. */
+export interface SessionIdentity {
+  /** Label shown over the character (e.g. the agent's name). */
+  agentName?: string;
+  /** Preferred character palette (0-5 for the bundled sheets). */
+  palette?: number;
+  /** Hue shift in degrees (0-360). */
+  hueShift?: number;
+}
+
 // ── Hook-based Provider (CLIs with hooks APIs) ────────────────
 
 export interface HookProvider {
@@ -107,6 +117,18 @@ export interface HookProvider {
   /** Terminal name prefix used when launching this CLI. Used by the extension to
    *  match VS Code terminals to agents for heuristic adoption. */
   readonly terminalNamePrefix?: string;
+
+  // ── Optional push-based identity (orchestrators that already know their agents) ──
+
+  /** True when every session this provider reports is wanted in the office, even
+   *  outside a tracked project dir and with Watch All Sessions off. For an
+   *  orchestrator that POSTs its own agents' activity, sending the event IS the
+   *  opt-in; there is no stray-session noise to filter. */
+  readonly adoptsAllSessions?: boolean;
+  /** Fixed identity for a session: the label shown over the character and a
+   *  preferred palette, instead of the diversity assigner's pick. Undefined (or
+   *  an undefined field) falls back to the default behavior. */
+  sessionIdentity?(sessionId: string): SessionIdentity | undefined;
 
   /** Context window, in tokens, for a model id this CLI reports in its
    *  transcripts. Transcripts state token usage but never the limit it counts
