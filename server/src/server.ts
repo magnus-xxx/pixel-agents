@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -100,7 +101,7 @@ export class PixelAgentsServer {
     // a shell for a `--no-terminal` launch would make the opt-out a lie. Prune
     // dead entries first so a crashed server's stale file never blocks
     // discovery of a live one.
-    const registry = this.readAndPruneRegistry();
+    const registry = await this.dropUnreachable(this.readAndPruneRegistry());
     if (options?.rotateToken && !embedded) {
       const running = registry.find((e) => e.servesSpa);
       if (running) {
@@ -290,6 +291,35 @@ export class PixelAgentsServer {
     return live;
   }
 
+  /**
+   * A live PID is not proof of a live server: after a reboot Windows hands old
+   * PIDs to unrelated programs, so a stale entry passes the PID check and the
+   * caller "reuses" a port nobody listens on (blank page / "refused to
+   * connect"). Keep only entries whose port actually accepts a connection;
+   * delete the rest like dead entries.
+   */
+  private async dropUnreachable(entries: ServerConfig[]): Promise<ServerConfig[]> {
+    const checks = await Promise.all(
+      entries.map((entry) => isPortAnswering(probeHost(entry), entry.port)),
+    );
+    const reachable: ServerConfig[] = [];
+    entries.forEach((entry, i) => {
+      if (checks[i]) {
+        reachable.push(entry);
+        return;
+      }
+      console.log(
+        `[Pixel Agents] Ignoring stale registry entry: PID ${entry.pid} is alive but nothing answers on port ${entry.port} (PID likely reused after a restart)`,
+      );
+      try {
+        fs.unlinkSync(this.getRegistryFilePath(entry));
+      } catch {
+        /* already gone */
+      }
+    });
+    return reachable;
+  }
+
   /** Write this server's registry entry atomically (tmp + rename) with mode 0o600. */
   private writeRegistryEntry(config: ServerConfig): void {
     const dir = this.getRegistryDir();
@@ -324,6 +354,27 @@ export class PixelAgentsServer {
 function normalizedAllowedHosts(hosts: readonly string[]): string[] {
   const names = hosts.map((h) => normalizeHostname(h)).filter((h): h is string => h !== null);
   return [...new Set(names)].sort();
+}
+
+/** Host to probe a registered server on: its bind host when it is specific,
+ *  loopback for wildcard binds and embedded servers (always 127.0.0.1). */
+function probeHost(entry: ServerConfig): string {
+  const host = entry.standalone?.host;
+  return !host || host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+}
+
+/** True when something accepts a TCP connection on host:port (connect, then close). */
+function isPortAnswering(host: string, port: number, timeoutMs = 500): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+    const done = (ok: boolean) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
 }
 
 /** Check if a process is alive by sending signal 0 (no-op, just checks existence). */

@@ -194,6 +194,28 @@ describe('PixelAgentsServer', () => {
     server2.stop();
   });
 
+  // 12b. Stale entry whose PID is alive (reused by another program after a
+  // reboot) but whose port answers nothing: never reuse it; drop it and start.
+  it('does not reuse a registry entry whose PID is alive but whose port is closed', async () => {
+    const config1 = await server.start({ embedded: false });
+    server.stop();
+    const net = await import('net');
+    const probe = net.createServer().listen(0, '127.0.0.1');
+    await new Promise((resolve) => probe.once('listening', resolve));
+    const deadPort = (probe.address() as { port: number }).port;
+    await new Promise((resolve) => probe.close(resolve));
+    fs.mkdirSync(registryDir, { recursive: true });
+    const staleFile = path.join(registryDir, `${process.pid}-${deadPort}.json`);
+    fs.writeFileSync(staleFile, JSON.stringify({ ...config1, pid: process.pid, port: deadPort }));
+
+    server = new PixelAgentsServer();
+    const config2 = await server.start({ embedded: false });
+    expect(config2.port).not.toBe(deadPort);
+    expect(fs.existsSync(staleFile)).toBe(false);
+    const res = await fetch(`http://127.0.0.1:${config2.port}/api/health`);
+    expect(res.status).toBe(200);
+  });
+
   // 13. Capability mismatch: a standalone caller never reuses an embedded server
   it('standalone does not reuse an existing embedded server; starts its own', async () => {
     const config1 = await server.start({ embedded: true });
